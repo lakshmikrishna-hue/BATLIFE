@@ -1,0 +1,793 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Battery Health & Charge Monitor</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                    colors: {
+                        brand: {
+                            green: '#10B981',
+                            yellow: '#F59E0B',
+                            red: '#EF4444',
+                            blue: '#3B82F6',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        /* Custom scrollbar for log history */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(15, 23, 42, 0.6);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(51, 65, 85, 0.8);
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(71, 85, 105, 1);
+        }
+        /* Battery Fluid Animation */
+        .battery-fluid {
+            transition: height 0.8s ease-in-out, background-color 0.5s ease;
+        }
+        .pulse-ring {
+            animation: pulse-ring 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        @keyframes pulse-ring {
+            0%, 100% { opacity: 0.8; transform: scale(1); }
+            50% { opacity: 0.4; transform: scale(1.03); }
+        }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-full font-sans flex flex-col justify-between selection:bg-emerald-500 selection:text-white">
+
+    <!-- Top Navigation Bar -->
+    <header class="border-b border-slate-800 bg-slate-900/60 backdrop-blur-md sticky top-0 z-50">
+        <div class="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
+            <div class="flex items-center space-x-3">
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-400 flex items-center justify-center shadow-lg shadow-emerald-500/20">
+                    <i class="fa-solid font-bold fa-battery-three-quarters text-slate-950 text-xl"></i>
+                </div>
+                <div>
+                    <h1 class="text-lg font-bold tracking-tight text-white flex items-center gap-2">
+                        Charge Sentinel
+                        <span id="api-status-badge" class="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 font-normal border border-slate-700">Detecting...</span>
+                    </h1>
+                    <p class="text-xs text-slate-400">Battery Health Guard (20% – 80% Rule)</p>
+                </div>
+            </div>
+
+            <div class="flex items-center space-x-2 sm:space-x-4">
+                <!-- Notifications Button -->
+                <button id="btn-request-notif" onclick="toggleNotifications()" class="flex items-center space-x-2 px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs sm:text-sm font-medium border border-slate-700 transition">
+                    <i id="notif-icon" class="fa-solid fa-bell text-slate-400"></i>
+                    <span id="notif-text" class="hidden sm:inline">Enable Alerts</span>
+                </button>
+                
+                <!-- Mute Toggle -->
+                <button id="btn-toggle-sound" onclick="toggleAudio()" class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition" title="Toggle Sound Alarms">
+                    <i id="sound-icon" class="fa-solid fa-volume-high text-emerald-400"></i>
+                </button>
+
+                <!-- Simulation Mode Toggle -->
+                <button id="btn-toggle-sim" onclick="toggleSimMode()" class="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs sm:text-sm font-medium border border-slate-700 text-slate-300 transition flex items-center space-x-1.5">
+                    <i class="fa-solid fa-sliders text-sky-400"></i>
+                    <span class="hidden sm:inline">Simulation</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Container -->
+    <main class="max-w-6xl mx-auto px-4 py-8 flex-1 w-full space-y-8">
+        
+        <!-- Active Banner Alert (High or Low Battery warning) -->
+        <div id="alert-banner" class="hidden rounded-2xl p-4 border flex items-center justify-between transition-all duration-300">
+            <div class="flex items-center space-x-3">
+                <div id="alert-banner-icon" class="w-10 h-10 rounded-full flex items-center justify-center text-xl shrink-0"></div>
+                <div>
+                    <h3 id="alert-banner-title" class="font-bold text-base">---</h3>
+                    <p id="alert-banner-desc" class="text-xs sm:text-sm text-slate-300">---</p>
+                </div>
+            </div>
+            <button onclick="dismissBanner()" class="text-slate-400 hover:text-white p-2 text-lg">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+        </div>
+
+        <!-- Upper Section: Battery Visualizer & Metrics -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            
+            <!-- Battery Card (Main Display) -->
+            <div class="lg:col-span-2 bg-slate-900/80 border border-slate-800 rounded-3xl p-6 sm:p-8 relative overflow-hidden flex flex-col justify-between shadow-2xl backdrop-blur-xl">
+                <!-- Decorative background radial -->
+                <div class="absolute -top-24 -right-24 w-64 h-64 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none"></div>
+
+                <div class="flex justify-between items-start mb-6">
+                    <div>
+                        <span class="text-xs uppercase font-bold tracking-wider text-slate-400">Current Status</span>
+                        <h2 id="battery-status-text" class="text-2xl sm:text-3xl font-extrabold text-white mt-1">
+                            Discharging
+                        </h2>
+                    </div>
+                    <!-- Plugged / Unplugged Badge -->
+                    <div id="plug-badge" class="flex items-center space-x-2 px-3 py-1.5 rounded-full bg-slate-800 border border-slate-700 text-xs font-semibold text-slate-300">
+                        <i id="plug-icon" class="fa-solid fa-plug text-slate-400"></i>
+                        <span id="plug-text">Battery Power</span>
+                    </div>
+                </div>
+
+                <!-- Center Gauge & Level -->
+                <div class="flex flex-col md:flex-row items-center justify-center my-4 gap-8">
+                    <!-- Vertical Battery Graphic -->
+                    <div class="relative w-28 h-52 bg-slate-950 border-4 border-slate-700 rounded-3xl p-1.5 flex flex-col justify-end shadow-inner">
+                        <!-- Battery Nipple Header -->
+                        <div class="absolute -top-3.5 left-1/2 -translate-x-1/2 w-10 h-3 bg-slate-700 rounded-t-sm"></div>
+                        
+                        <!-- Fluid Level Fill -->
+                        <div id="battery-fill" class="battery-fluid w-full rounded-2xl bg-emerald-500 flex items-center justify-center relative overflow-hidden" style="height: 50%;">
+                            <!-- Subtle wave sheen -->
+                            <div class="absolute inset-0 bg-white/10 opacity-30"></div>
+                        </div>
+
+                        <!-- 80% & 20% Guideline markers -->
+                        <div class="absolute top-[20%] left-0 right-0 border-b border-dashed border-red-500/50 pointer-events-none flex justify-end pr-1">
+                            <span class="text-[9px] text-red-400/80 font-mono font-bold">80% Limit</span>
+                        </div>
+                        <div class="absolute bottom-[20%] left-0 right-0 border-b border-dashed border-yellow-500/50 pointer-events-none flex justify-end pr-1">
+                            <span class="text-[9px] text-yellow-400/80 font-mono font-bold">20% Low</span>
+                        </div>
+                    </div>
+
+                    <!-- Digital Percentage & Details -->
+                    <div class="text-center md:text-left space-y-2">
+                        <div class="flex items-baseline justify-center md:justify-start gap-1">
+                            <span id="battery-percentage" class="text-6xl sm:text-7xl font-black text-white tracking-tight">50</span>
+                            <span class="text-3xl font-bold text-emerald-400">%</span>
+                        </div>
+                        <p id="time-remaining" class="text-sm text-slate-400 flex items-center justify-center md:justify-start gap-1.5">
+                            <i class="fa-regular fa-clock"></i>
+                            <span>Time remaining: Calculating...</span>
+                        </p>
+                        <div id="health-indicator-badge" class="inline-flex items-center gap-2 px-3 py-1 rounded-lg bg-emerald-950/60 border border-emerald-800 text-emerald-300 text-xs font-medium">
+                            <i class="fa-solid fa-heart-pulse text-emerald-400"></i>
+                            <span id="health-status-msg">Optimal Charge Zone (20% - 80%)</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Footer Summary info -->
+                <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-6 border-t border-slate-800/80 mt-4 text-center">
+                    <div class="bg-slate-950/40 p-3 rounded-xl border border-slate-800/60">
+                        <span class="text-xs text-slate-400 block mb-1">Max Threshold</span>
+                        <span id="display-high-thresh" class="text-lg font-bold text-red-400">80%</span>
+                    </div>
+                    <div class="bg-slate-950/40 p-3 rounded-xl border border-slate-800/60">
+                        <span class="text-xs text-slate-400 block mb-1">Min Threshold</span>
+                        <span id="display-low-thresh" class="text-lg font-bold text-yellow-400">20%</span>
+                    </div>
+                    <div class="col-span-2 sm:col-span-1 bg-slate-950/40 p-3 rounded-xl border border-slate-800/60">
+                        <span class="text-xs text-slate-400 block mb-1">Alarm Sound</span>
+                        <span id="display-sound-status" class="text-lg font-bold text-emerald-400">ON</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Settings & Configuration Card -->
+            <div class="bg-slate-900/80 border border-slate-800 rounded-3xl p-6 flex flex-col justify-between shadow-xl backdrop-blur-xl">
+                <div>
+                    <h2 class="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                        <i class="fa-solid fa-sliders text-emerald-400"></i>
+                        Alert Thresholds
+                    </h2>
+
+                    <div class="space-y-6">
+                        <!-- High Battery Slider (Unplug Prompt) -->
+                        <div>
+                            <div class="flex justify-between items-center mb-2">
+                                <label for="slider-high" class="text-xs sm:text-sm font-semibold text-slate-300 flex items-center gap-1.5">
+                                    <i class="fa-solid fa-plug-circle-xmark text-red-400"></i>
+                                    High Alert (Unplug)
+                                </label>
+                                <span id="val-high" class="text-sm font-bold text-red-400 bg-red-950/50 px-2 py-0.5 rounded border border-red-900/40">80%</span>
+                            </div>
+                            <input id="slider-high" type="range" min="50" max="100" value="80" oninput="updateSettings()" class="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-red-500">
+                            <p class="text-[11px] text-slate-400 mt-1">Warns to disconnect charger to prevent overcharge stress.</p>
+                        </div>
+
+                        <!-- Low Battery Slider (Plug-in Prompt) -->
+                        <div>
+                            <div class="flex justify-between items-center mb-2">
+                                <label for="slider-low" class="text-xs sm:text-sm font-semibold text-slate-300 flex items-center gap-1.5">
+                                    <i class="fa-solid fa-bolt text-yellow-400"></i>
+                                    Low Alert (Plug In)
+                                </label>
+                                <span id="val-low" class="text-sm font-bold text-yellow-400 bg-yellow-950/50 px-2 py-0.5 rounded border border-yellow-900/40">20%</span>
+                            </div>
+                            <input id="slider-low" type="range" min="5" max="45" value="20" oninput="updateSettings()" class="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-yellow-500">
+                            <p class="text-[11px] text-slate-400 mt-1">Warns to connect charger to avoid deep discharge strain.</p>
+                        </div>
+
+                        <!-- Simulation Controls (Visible when sim mode active or manual trigger) -->
+                        <div id="sim-controls-wrapper" class="p-4 bg-slate-950/60 rounded-2xl border border-slate-800 space-y-3">
+                            <div class="flex justify-between items-center">
+                                <span class="text-xs font-bold uppercase text-sky-400 tracking-wider">Manual Simulator</span>
+                                <span class="text-[10px] text-slate-400">Interactive Mode</span>
+                            </div>
+                            
+                            <div>
+                                <label class="text-xs text-slate-400 block mb-1">Simulate Charge Level</label>
+                                <input id="sim-slider" type="range" min="0" max="100" value="50" oninput="handleSimSlider(this.value)" class="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-sky-400">
+                            </div>
+
+                            <div class="flex items-center justify-between pt-1">
+                                <span class="text-xs text-slate-300">Charging Cable</span>
+                                <button id="btn-toggle-charging" onclick="toggleSimCharging()" class="px-3 py-1 rounded-lg bg-sky-950 hover:bg-sky-900 border border-sky-700 text-xs text-sky-300 font-semibold transition">
+                                    <i class="fa-solid fa-power-off mr-1"></i> Toggle Plugged
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Alarm Test Button -->
+                <button onclick="testAlarm()" class="w-full mt-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-bold uppercase tracking-wider transition flex items-center justify-center space-x-2">
+                    <i class="fa-solid fa-bullhorn text-emerald-400"></i>
+                    <span>Test Notification & Audio</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Lower Section: Battery Health Rules & History Logs -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            
+            <!-- Battery Longevity Science & Tips -->
+            <div class="lg:col-span-2 bg-slate-900/80 border border-slate-800 rounded-3xl p-6 shadow-xl backdrop-blur-xl">
+                <h3 class="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                    <i class="fa-solid fa-shield-heart text-emerald-400"></i>
+                    Why Maintain 20% – 80% Battery Charge?
+                </h3>
+                
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+                    <div class="bg-slate-950/50 p-4 rounded-2xl border border-slate-800/80">
+                        <div class="text-emerald-400 text-xl mb-2"><i class="fa-solid fa-recycle"></i></div>
+                        <h4 class="font-bold text-sm text-slate-200 mb-1">Extended Lifespan</h4>
+                        <p class="text-xs text-slate-400">Lithium-ion batteries experience the least chemical degradation when kept between 20% and 80% capacity.</p>
+                    </div>
+
+                    <div class="bg-slate-950/50 p-4 rounded-2xl border border-slate-800/80">
+                        <div class="text-yellow-400 text-xl mb-2"><i class="fa-solid fa-temperature-high"></i></div>
+                        <h4 class="font-bold text-sm text-slate-200 mb-1">Reduced Heat & Stress</h4>
+                        <p class="text-xs text-slate-400">Charging above 80% increases internal resistance and voltage stress, generating excessive wear heat.</p>
+                    </div>
+
+                    <div class="bg-slate-950/50 p-4 rounded-2xl border border-slate-800/80">
+                        <div class="text-red-400 text-xl mb-2"><i class="fa-solid fa-battery-empty"></i></div>
+                        <h4 class="font-bold text-sm text-slate-200 mb-1">Prevent Deep Discharge</h4>
+                        <p class="text-xs text-slate-400">Draining below 20% puts extreme voltage strain on battery electrodes, decreasing overall charge cycle counts.</p>
+                    </div>
+                </div>
+
+                <div class="p-4 bg-emerald-950/30 border border-emerald-800/50 rounded-2xl flex items-start space-x-3">
+                    <i class="fa-solid fa-lightbulb text-emerald-400 text-lg mt-0.5"></i>
+                    <p class="text-xs text-emerald-200/90 leading-relaxed">
+                        <strong class="font-bold">Pro Tip:</strong> You can keep this web tab open or minimized while working. When your device reaches 80% while charging or drops to 20% while on battery, Charge Sentinel will ring an alarm and send a system notification!
+                    </p>
+                </div>
+            </div>
+
+            <!-- Activity / Event Log -->
+            <div class="bg-slate-900/80 border border-slate-800 rounded-3xl p-6 shadow-xl backdrop-blur-xl flex flex-col justify-between">
+                <div>
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-base font-bold text-white flex items-center gap-2">
+                            <i class="fa-solid fa-clock-rotate-left text-sky-400"></i>
+                            Alert Activity Log
+                        </h3>
+                        <button onclick="clearLogs()" class="text-[11px] text-slate-400 hover:text-red-400 transition">
+                            Clear
+                        </button>
+                    </div>
+
+                    <div id="log-container" class="space-y-2.5 max-h-56 overflow-y-auto pr-1">
+                        <!-- Dynamic log items will be added here -->
+                        <div class="text-center py-8 text-slate-400 text-xs italic" id="empty-log-msg">
+                            No charge alerts triggered yet.
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mt-4 pt-3 border-t border-slate-800 text-[11px] text-slate-400 flex justify-between items-center">
+                    <span>Logged Session Events</span>
+                    <span id="log-count" class="font-mono bg-slate-800 px-2 py-0.5 rounded text-slate-300">0</span>
+                </div>
+            </div>
+
+        </div>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="border-t border-slate-800/80 bg-slate-950 py-4 mt-8">
+        <div class="max-w-6xl mx-auto px-4 text-center text-xs text-slate-400 flex flex-col sm:flex-row items-center justify-between gap-2">
+            <p>Charge Sentinel — Web Battery Health & Longevity Assistant</p>
+            <p class="text-[11px] text-slate-400">Uses Browser Battery API &amp; Web Audio API</p>
+        </div>
+    </footer>
+
+    <!-- JavaScript Application Logic -->
+    <script>
+        // State variables
+        let batteryObj = null;
+        let isSimulating = false;
+        let soundEnabled = true;
+        let lastAlertTriggered = null; // 'HIGH' | 'LOW' | null
+        
+        // Sim State
+        let simLevel = 50;
+        let simCharging = false;
+
+        // Settings
+        let highThreshold = 80;
+        let lowThreshold = 20;
+
+        // Logs
+        let logs = [];
+
+        // Audio Context for Alarm Synthesis
+        let audioCtx = null;
+
+        // Initialize App
+        window.addEventListener('DOMContentLoaded', () => {
+            initBattery();
+            updateSettingsUI();
+            checkNotificationPermissionUI();
+        });
+
+        // Initialize Battery API or Simulation Fallback
+        async function initBattery() {
+            const badge = document.getElementById('api-status-badge');
+            
+            if ('getBattery' in navigator) {
+                try {
+                    batteryObj = await navigator.getBattery();
+                    badge.innerText = 'Live API Active';
+                    badge.className = 'text-xs px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 font-medium border border-emerald-800';
+                    
+                    // Attach Event Listeners
+                    batteryObj.addEventListener('levelchange', updateBatteryState);
+                    batteryObj.addEventListener('chargingchange', updateBatteryState);
+                    batteryObj.addEventListener('dischargingtimechange', updateBatteryState);
+                    batteryObj.addEventListener('chargingtimechange', updateBatteryState);
+                    
+                    updateBatteryState();
+                } catch (e) {
+                    console.warn('Battery API error:', e);
+                    enableSimMode('API Access Denied');
+                }
+            } else {
+                enableSimMode('API Unsupported');
+            }
+        }
+
+        // Enable Simulation Mode
+        function enableSimMode(reason = 'Simulation Mode') {
+            isSimulating = true;
+            const badge = document.getElementById('api-status-badge');
+            badge.innerText = reason;
+            badge.className = 'text-xs px-2 py-0.5 rounded-full bg-sky-950 text-sky-300 font-medium border border-sky-800';
+            updateBatteryState();
+        }
+
+        function toggleSimMode() {
+            isSimulating = !isSimulating;
+            const badge = document.getElementById('api-status-badge');
+            if (isSimulating) {
+                badge.innerText = 'Simulation Active';
+                badge.className = 'text-xs px-2 py-0.5 rounded-full bg-sky-950 text-sky-300 font-medium border border-sky-800';
+            } else if (batteryObj) {
+                badge.innerText = 'Live API Active';
+                badge.className = 'text-xs px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 font-medium border border-emerald-800';
+            } else {
+                badge.innerText = 'API Unsupported';
+                badge.className = 'text-xs px-2 py-0.5 rounded-full bg-amber-950 text-amber-300 font-medium border border-amber-800';
+            }
+            updateBatteryState();
+        }
+
+        // Update State & Render Visuals
+        function updateBatteryState() {
+            let level = 0.5;
+            let charging = false;
+            let chargingTime = Infinity;
+            let dischargingTime = Infinity;
+
+            if (isSimulating || !batteryObj) {
+                level = simLevel / 100;
+                charging = simCharging;
+            } else {
+                level = batteryObj.level;
+                charging = batteryObj.charging;
+                chargingTime = batteryObj.chargingTime;
+                dischargingTime = batteryObj.dischargingTime;
+            }
+
+            const pct = Math.round(level * 100);
+
+            // Update Level Percentage Text & Battery Gauge
+            document.getElementById('battery-percentage').innerText = pct;
+            const fill = document.getElementById('battery-fill');
+            fill.style.height = `${pct}%`;
+
+            // Adjust Color & Status based on health zones
+            const statusText = document.getElementById('battery-status-text');
+            const healthBadge = document.getElementById('health-indicator-badge');
+            const healthMsg = document.getElementById('health-status-msg');
+
+            if (pct >= highThreshold) {
+                fill.className = 'battery-fluid w-full rounded-2xl bg-red-500 flex items-center justify-center relative overflow-hidden';
+                healthBadge.className = 'inline-flex items-center gap-2 px-3 py-1 rounded-lg bg-red-950/60 border border-red-800 text-red-300 text-xs font-medium';
+                healthMsg.innerText = charging ? 'High Charge Stress! Disconnect Charger' : 'High Battery Charge';
+            } else if (pct <= lowThreshold) {
+                fill.className = 'battery-fluid w-full rounded-2xl bg-yellow-500 flex items-center justify-center relative overflow-hidden';
+                healthBadge.className = 'inline-flex items-center gap-2 px-3 py-1 rounded-lg bg-yellow-950/60 border border-yellow-800 text-yellow-300 text-xs font-medium';
+                healthMsg.innerText = !charging ? 'Low Charge Warning! Connect Charger' : 'Charging Low Battery';
+            } else {
+                fill.className = 'battery-fluid w-full rounded-2xl bg-emerald-500 flex items-center justify-center relative overflow-hidden';
+                healthBadge.className = 'inline-flex items-center gap-2 px-3 py-1 rounded-lg bg-emerald-950/60 border border-emerald-800 text-emerald-300 text-xs font-medium';
+                healthMsg.innerText = 'Optimal Charge Zone (20% – 80%)';
+            }
+
+            // Plug Status
+            const plugBadge = document.getElementById('plug-badge');
+            const plugIcon = document.getElementById('plug-icon');
+            const plugText = document.getElementById('plug-text');
+
+            if (charging) {
+                statusText.innerText = 'Charging';
+                plugBadge.className = 'flex items-center space-x-2 px-3 py-1.5 rounded-full bg-emerald-950 border border-emerald-700 text-xs font-semibold text-emerald-300 pulse-ring';
+                plugIcon.className = 'fa-solid fa-bolt text-emerald-400';
+                plugText.innerText = 'AC Connected';
+            } else {
+                statusText.innerText = 'Discharging';
+                plugBadge.className = 'flex items-center space-x-2 px-3 py-1.5 rounded-full bg-slate-800 border border-slate-700 text-xs font-semibold text-slate-300';
+                plugIcon.className = 'fa-solid fa-plug text-slate-400';
+                plugText.innerText = 'Battery Power';
+            }
+
+            // Time Remaining Text
+            const timeElem = document.getElementById('time-remaining');
+            if (charging) {
+                if (isFinite(chargingTime) && chargingTime > 0) {
+                    const mins = Math.round(chargingTime / 60);
+                    timeElem.innerHTML = `<i class="fa-regular fa-clock"></i><span>Full charge in approx ${mins} min</span>`;
+                } else {
+                    timeElem.innerHTML = `<i class="fa-solid fa-charging-station text-emerald-400"></i><span>Power connected & charging</span>`;
+                }
+            } else {
+                if (isFinite(dischargingTime) && dischargingTime > 0) {
+                    const mins = Math.round(dischargingTime / 60);
+                    timeElem.innerHTML = `<i class="fa-regular fa-clock"></i><span>Est. remaining: ${mins} min</span>`;
+                } else {
+                    timeElem.innerHTML = `<i class="fa-regular fa-clock"></i><span>Running on battery power</span>`;
+                }
+            }
+
+            // Threshold Checks for Alerts
+            checkAlertConditions(pct, charging);
+        }
+
+        // Alert Evaluation Logic
+        function checkAlertConditions(pct, charging) {
+            // High Battery Alert Rule: Reached or exceeded high limit & currently charging
+            if (pct >= highThreshold && charging) {
+                if (lastAlertTriggered !== 'HIGH') {
+                    triggerAlert(
+                        'HIGH',
+                        'Battery Charged to 80%+',
+                        `Battery level is at ${pct}%. Disconnect charger now to protect long-term battery health!`
+                    );
+                    lastAlertTriggered = 'HIGH';
+                }
+            } 
+            // Low Battery Alert Rule: Reached or below low limit & currently NOT charging
+            else if (pct <= lowThreshold && !charging) {
+                if (lastAlertTriggered !== 'LOW') {
+                    triggerAlert(
+                        'LOW',
+                        'Low Battery Warning (20%)',
+                        `Battery level dropped to ${pct}%. Plug in charger to avoid deep discharge stress!`
+                    );
+                    lastAlertTriggered = 'LOW';
+                }
+            } 
+            // Reset trigger state when conditions clear
+            else {
+                if ((pct < highThreshold && lastAlertTriggered === 'HIGH') || 
+                    (pct > lowThreshold && lastAlertTriggered === 'LOW')) {
+                    lastAlertTriggered = null;
+                    dismissBanner();
+                }
+            }
+        }
+
+        // Execute Alert Actions (Audio + Banner + Browser Notification + Log)
+        function triggerAlert(type, title, message) {
+            // 1. Show UI Banner
+            const banner = document.getElementById('alert-banner');
+            const icon = document.getElementById('alert-banner-icon');
+            const titleElem = document.getElementById('alert-banner-title');
+            const descElem = document.getElementById('alert-banner-desc');
+
+            banner.classList.remove('hidden');
+            titleElem.innerText = title;
+            descElem.innerText = message;
+
+            if (type === 'HIGH') {
+                banner.className = 'rounded-2xl p-4 border flex items-center justify-between transition-all duration-300 bg-red-950/80 border-red-700 text-red-100 shadow-xl shadow-red-950/40 animate-bounce';
+                icon.className = 'w-10 h-10 rounded-full flex items-center justify-center text-xl shrink-0 bg-red-900/80 text-red-300';
+                icon.innerHTML = '<i class="fa-solid fa-plug-circle-xmark"></i>';
+            } else {
+                banner.className = 'rounded-2xl p-4 border flex items-center justify-between transition-all duration-300 bg-yellow-950/80 border-yellow-700 text-yellow-100 shadow-xl shadow-yellow-950/40 animate-bounce';
+                icon.className = 'w-10 h-10 rounded-full flex items-center justify-center text-xl shrink-0 bg-yellow-900/80 text-yellow-300';
+                icon.innerHTML = '<i class="fa-solid fa-battery-quarter"></i>';
+            }
+
+            // 2. Play Synthesized Sound Alarm
+            if (soundEnabled) {
+                playAlarmSound(type);
+            }
+
+            // 3. Send Browser Notification if allowed
+            if (Notification.permission === 'granted') {
+                try {
+                    new Notification(title, {
+                        body: message,
+                        icon: 'https://cdn-icons-png.flaticon.com/512/3103/3103446.png'
+                    });
+                } catch (e) {
+                    console.log('Notification error:', e);
+                }
+            }
+
+            // 4. Log event
+            addLog(type, title, message);
+        }
+
+        function dismissBanner() {
+            document.getElementById('alert-banner').classList.add('hidden');
+        }
+
+        // Web Audio API Synthesizer (No external audio file dependency)
+        function playAlarmSound(type) {
+            try {
+                if (!audioCtx) {
+                    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                }
+
+                if (audioCtx.state === 'suspended') {
+                    audioCtx.resume();
+                }
+
+                const now = audioCtx.currentTime;
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+
+                if (type === 'HIGH') {
+                    // High alert double-beep tone (800Hz -> 1000Hz)
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(800, now);
+                    osc.frequency.exponentialRampToValueAtTime(1200, now + 0.15);
+                    
+                    gain.gain.setValueAtTime(0.3, now);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
+
+                    osc.start(now);
+                    osc.stop(now + 0.4);
+
+                    // Repeat second pulse
+                    setTimeout(() => {
+                        if (!audioCtx) return;
+                        const osc2 = audioCtx.createOscillator();
+                        const gain2 = audioCtx.createGain();
+                        osc2.connect(gain2);
+                        gain2.connect(audioCtx.destination);
+                        osc2.type = 'sine';
+                        osc2.frequency.setValueAtTime(1000, audioCtx.currentTime);
+                        osc2.frequency.exponentialRampToValueAtTime(1400, audioCtx.currentTime + 0.15);
+                        gain2.gain.setValueAtTime(0.3, audioCtx.currentTime);
+                        gain2.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.4);
+                        osc2.start();
+                        osc2.stop(audioCtx.currentTime + 0.4);
+                    }, 450);
+
+                } else {
+                    // Low alert warning tone (Low frequency pulses)
+                    osc.type = 'triangle';
+                    osc.frequency.setValueAtTime(400, now);
+                    osc.frequency.linearRampToValueAtTime(250, now + 0.3);
+
+                    gain.gain.setValueAtTime(0.4, now);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.5);
+
+                    osc.start(now);
+                    osc.stop(now + 0.5);
+                }
+            } catch(e) {
+                console.warn('Audio playback error:', e);
+            }
+        }
+
+        // Settings & Slider Controls
+        function updateSettings() {
+            highThreshold = parseInt(document.getElementById('slider-high').value);
+            lowThreshold = parseInt(document.getElementById('slider-low').value);
+
+            // Validation guard
+            if (lowThreshold >= highThreshold - 5) {
+                lowThreshold = highThreshold - 5;
+                document.getElementById('slider-low').value = lowThreshold;
+            }
+
+            document.getElementById('val-high').innerText = `${highThreshold}%`;
+            document.getElementById('val-low').innerText = `${lowThreshold}%`;
+
+            document.getElementById('display-high-thresh').innerText = `${highThreshold}%`;
+            document.getElementById('display-low-thresh').innerText = `${lowThreshold}%`;
+
+            updateBatteryState();
+        }
+
+        function updateSettingsUI() {
+            document.getElementById('slider-high').value = highThreshold;
+            document.getElementById('slider-low').value = lowThreshold;
+            document.getElementById('val-high').innerText = `${highThreshold}%`;
+            document.getElementById('val-low').innerText = `${lowThreshold}%`;
+        }
+
+        // Simulation Slider Handler
+        function handleSimSlider(val) {
+            simLevel = parseInt(val);
+            if (!isSimulating) {
+                toggleSimMode();
+            } else {
+                updateBatteryState();
+            }
+        }
+
+        function toggleSimCharging() {
+            simCharging = !simCharging;
+            if (!isSimulating) {
+                toggleSimMode();
+            } else {
+                updateBatteryState();
+            }
+        }
+
+        // Mute / Sound Toggle
+        function toggleAudio() {
+            soundEnabled = !soundEnabled;
+            const soundIcon = document.getElementById('sound-icon');
+            const soundText = document.getElementById('display-sound-status');
+
+            if (soundEnabled) {
+                soundIcon.className = 'fa-solid fa-volume-high text-emerald-400';
+                soundText.innerText = 'ON';
+                soundText.className = 'text-lg font-bold text-emerald-400';
+            } else {
+                soundIcon.className = 'fa-solid fa-volume-xmark text-slate-500';
+                soundText.innerText = 'OFF';
+                soundText.className = 'text-lg font-bold text-slate-500';
+            }
+        }
+
+        // Browser Notifications Permission Handler
+        async function toggleNotifications() {
+            if (!('Notification' in window)) {
+                alert('Desktop notifications are not supported in this browser.');
+                return;
+            }
+
+            if (Notification.permission === 'granted') {
+                alert('Notifications are already enabled!');
+            } else if (Notification.permission !== 'denied') {
+                const permission = await Notification.requestPermission();
+                checkNotificationPermissionUI();
+                if (permission === 'granted') {
+                    new Notification('Charge Sentinel Enabled', {
+                        body: 'You will receive alerts when your battery reaches 80% or drops to 20%.',
+                    });
+                }
+            } else {
+                alert('Notification permission was blocked in browser settings. Please enable them manually in browser site settings.');
+            }
+        }
+
+        function checkNotificationPermissionUI() {
+            const btnText = document.getElementById('notif-text');
+            const btnIcon = document.getElementById('notif-icon');
+
+            if ('Notification' in window && Notification.permission === 'granted') {
+                btnText.innerText = 'Alerts Enabled';
+                btnIcon.className = 'fa-solid fa-bell-circle-check text-emerald-400';
+            } else {
+                btnText.innerText = 'Enable Alerts';
+                btnIcon.className = 'fa-solid fa-bell text-slate-400';
+            }
+        }
+
+        // Logging System
+        function addLog(type, title, message) {
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+            logs.unshift({ type, title, message, time: timeStr });
+            renderLogs();
+        }
+
+        function renderLogs() {
+            const container = document.getElementById('log-container');
+            const emptyMsg = document.getElementById('empty-log-msg');
+            const logCount = document.getElementById('log-count');
+
+            logCount.innerText = logs.length;
+
+            if (logs.length === 0) {
+                if (emptyMsg) emptyMsg.classList.remove('hidden');
+                container.innerHTML = `<div class="text-center py-8 text-slate-400 text-xs italic">No charge alerts triggered yet.</div>`;
+                return;
+            }
+
+            container.innerHTML = logs.map(item => `
+                <div class="p-3 rounded-xl ${item.type === 'HIGH' ? 'bg-red-950/30 border border-red-900/40' : 'bg-yellow-950/30 border border-yellow-900/40'} flex items-start justify-between">
+                    <div>
+                        <div class="flex items-center space-x-2">
+                            <span class="text-xs font-bold ${item.type === 'HIGH' ? 'text-red-400' : 'text-yellow-400'}">${item.title}</span>
+                        </div>
+                        <p class="text-[11px] text-slate-300 mt-0.5">${item.message}</p>
+                    </div>
+                    <span class="text-[10px] font-mono text-slate-400 ml-2 shrink-0">${item.time}</span>
+                </div>
+            `).join('');
+        }
+
+        function clearLogs() {
+            logs = [];
+            renderLogs();
+        }
+
+        // Test Alarm Button Action
+        function testAlarm() {
+            triggerAlert(
+                'HIGH',
+                'Test Alarm Triggered',
+                'This is a test notification & sound alert for Charge Sentinel battery health monitor.'
+            );
+        }
+    </script>
+</body>
+</html>
