@@ -26,3 +26,5 @@ You can view the live hosted application via GitHub Pages:
 👉 https://lakshmikrishna-hue.github.io/BATLIFE/
 
 ---
+## 🙏 Acknowledgments
+Built with the assistance of Gemini as an AI collaborator.
